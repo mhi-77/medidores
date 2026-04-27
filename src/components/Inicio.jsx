@@ -2,8 +2,8 @@ import { useState } from 'react'
 import { leerPadron } from '../services/google'
 
 export default function Inicio({ token, socios, setSocios, onIniciar }) {
-  const [spreadsheetId, setSpreadsheetId] = useState(
-    localStorage.getItem('spreadsheetId') || ''
+const [spreadsheetId, setSpreadsheetId] = useState(
+    localStorage.getItem('spreadsheetId') || import.meta.env.VITE_SHEET_ID || ''
   )
   const [cargando, setCargando] = useState(false)
   const [error, setError] = useState('')
