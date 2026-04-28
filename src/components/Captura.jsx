@@ -14,9 +14,11 @@ export default function Captura({
   const [procesando, setProcesando] = useState(false)
   const fotoInputRef = useRef()
 
-  const sociosDisponibles = socios.filter(
-    s => !lecturas.find(l => l.id === s.id)
-  )
+  // Canvas reutilizable — evita crear/destruir canvas en cada foto
+  // lo que causaba acumulación de memoria en móviles
+  const canvasRef = useRef(null)
+
+  // ── SELECCIÓN DE SOCIO ──────────────────────────────────────────────────────
 
   function selectSocio(id) {
     const s = socios.find(s => s.id === id) || null
@@ -30,11 +32,19 @@ export default function Captura({
     setOcrValor('')
     setOcrConfianza(null)
     setOcrEstado('')
+    // Limpiar el canvas reutilizable al cambiar de socio
+    if (canvasRef.current) {
+      const ctx = canvasRef.current.getContext('2d')
+      ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height)
+    }
   }
+
+  // ── MANEJO DE FOTO ──────────────────────────────────────────────────────────
 
   async function handleFoto(e) {
     const file = e.target.files[0]
     if (!file) return
+    // Reducir tamaño antes de cualquier procesamiento
     const resized = await resizeImage(file)
     const resizedFile = new File([resized], file.name, { type: 'image/jpeg' })
     setImagenFile(resizedFile)
@@ -43,31 +53,48 @@ export default function Captura({
     await runOCR(url)
   }
 
-async function resizeImage(file, maxWidth = 640) {
+  // ── RESIZE DE IMAGEN ────────────────────────────────────────────────────────
+  // Reduce la foto a máximo 640px y calidad 70% antes de procesarla.
+  // Usa canvas reutilizable para no acumular memoria entre fotos.
+  // createImageBitmap es más eficiente en móviles que new Image().
+
+  async function resizeImage(file, maxWidth = 640) {
     return new Promise(async (resolve) => {
       try {
-        // createImageBitmap es más eficiente en memoria que Image()
+        // Reusar el mismo canvas en lugar de crear uno nuevo cada vez
+        if (!canvasRef.current) {
+          canvasRef.current = document.createElement('canvas')
+        }
+        const canvas = canvasRef.current
+        const ctx = canvas.getContext('2d')
+
         const bitmap = await createImageBitmap(file, {
           resizeWidth: maxWidth,
           resizeQuality: 'medium'
         })
-        const canvas = document.createElement('canvas')
+
         canvas.width = bitmap.width
         canvas.height = bitmap.height
-        const ctx = canvas.getContext('2d')
+        ctx.clearRect(0, 0, canvas.width, canvas.height)
         ctx.drawImage(bitmap, 0, 0)
-        bitmap.close() // liberar memoria inmediatamente
+        bitmap.close() // liberar memoria del bitmap inmediatamente
+
         canvas.toBlob((blob) => resolve(blob), 'image/jpeg', 0.7)
+
       } catch {
-        // fallback si createImageBitmap no está soportado
+        // Fallback para navegadores que no soportan createImageBitmap
         const img = new Image()
         const url = URL.createObjectURL(file)
         img.onload = () => {
+          if (!canvasRef.current) {
+            canvasRef.current = document.createElement('canvas')
+          }
+          const canvas = canvasRef.current
           const scale = Math.min(maxWidth / img.width, maxWidth / img.height, 1)
-          const canvas = document.createElement('canvas')
           canvas.width = img.width * scale
           canvas.height = img.height * scale
           const ctx = canvas.getContext('2d')
+          ctx.clearRect(0, 0, canvas.width, canvas.height)
           ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
           canvas.toBlob((blob) => resolve(blob), 'image/jpeg', 0.7)
           URL.revokeObjectURL(url)
@@ -77,7 +104,10 @@ async function resizeImage(file, maxWidth = 640) {
     })
   }
 
-async function imageToBase64(url) {
+  // ── OCR CON GOOGLE VISION ───────────────────────────────────────────────────
+
+  // Convierte una URL de objeto blob a base64 para mandársela a Vision API
+  async function imageToBase64(url) {
     const res = await fetch(url)
     const blob = await res.blob()
     return new Promise((resolve) => {
@@ -114,6 +144,8 @@ async function imageToBase64(url) {
     setProcesando(false)
   }
 
+  // ── GUARDAR LECTURA ─────────────────────────────────────────────────────────
+
   async function guardarLectura() {
     if (!socioActual) { alert('Seleccioná un socio primero.'); return }
     if (!ocrValor) { alert('El número de lectura está vacío.'); return }
@@ -123,6 +155,7 @@ async function imageToBase64(url) {
     try {
       let fotoUrl = ''
       if (imagenFile) {
+        // Crear estructura de carpetas en Drive: Medidores Club / mes actual
         const mes = new Date().toLocaleString('es-AR', { month: 'long', year: 'numeric' })
         const raizId = await buscarOCrearCarpeta(token, 'Medidores Club')
         const mesId = await buscarOCrearCarpeta(token, mes, raizId)
@@ -140,6 +173,7 @@ async function imageToBase64(url) {
         fotoUrl,
       }
 
+      // Actualizar o agregar la lectura en el estado local
       setLecturas(prev => {
         const idx = prev.findIndex(l => l.id === socioActual.id)
         if (idx >= 0) {
@@ -160,15 +194,20 @@ async function imageToBase64(url) {
     setGuardando(false)
   }
 
+  // ── COLOR DEL BADGE DE CONFIANZA ────────────────────────────────────────────
+
   const badgeColor = ocrConfianza >= 70
     ? { bg: '#f0fdf4', color: '#166534', border: '#bbf7d0' }
     : ocrConfianza >= 40
     ? { bg: '#fffbeb', color: '#854d0e', border: '#fde68a' }
     : { bg: '#fff3f3', color: '#c62828', border: '#ffcdd2' }
 
+  // ── RENDER ──────────────────────────────────────────────────────────────────
+
   return (
     <div style={{ padding: '1rem', maxWidth: 480, margin: '0 auto' }}>
 
+      {/* Header */}
       <div style={{
         display: 'flex', justifyContent: 'space-between',
         alignItems: 'center', marginBottom: '1rem'
@@ -198,8 +237,7 @@ async function imageToBase64(url) {
             width: '100%', padding: '10px 12px',
             fontSize: '0.9rem', border: '1px solid #ddd',
             borderRadius: 8, background: '#ffffff',
-            color: '#333333',
-            boxSizing: 'border-box',
+            color: '#333333', boxSizing: 'border-box',
           }}
         >
           <option value="">— elegir socio —</option>
@@ -214,7 +252,7 @@ async function imageToBase64(url) {
         </select>
       </div>
 
-      {/* Info del socio */}
+      {/* Info del socio seleccionado */}
       {socioActual && (
         <div style={{
           background: '#f8f8f8', borderRadius: 8,
@@ -234,7 +272,7 @@ async function imageToBase64(url) {
         </div>
       )}
 
-      {/* Foto */}
+      {/* Sección de foto */}
       <div style={{ marginBottom: '1rem' }}>
         <label style={{ fontSize: '0.8rem', color: '#666', display: 'block', marginBottom: 6 }}>
           Fotografía del medidor
@@ -272,7 +310,7 @@ async function imageToBase64(url) {
         </button>
       </div>
 
-      {/* OCR */}
+      {/* Resultado OCR y corrección manual */}
       {imagen && (
         <div style={{ marginBottom: '1rem' }}>
           <label style={{ fontSize: '0.8rem', color: '#666', display: 'block', marginBottom: 6 }}>
@@ -342,6 +380,7 @@ async function imageToBase64(url) {
         </div>
       )}
 
+      {/* Progreso de la recorrida */}
       {lecturas.length > 0 && (
         <div style={{
           background: '#f0fdf4', border: '1px solid #bbf7d0',
