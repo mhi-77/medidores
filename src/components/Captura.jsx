@@ -1,5 +1,4 @@
 import { useState, useRef } from 'react'
-import { buscarOCrearCarpeta, subirFoto } from '../services/google'
 import { buscarOCrearCarpeta, subirFoto, leerMedidorConVision } from '../services/google'
 
 export default function Captura({
