@@ -44,20 +44,36 @@ export default function Captura({
   }
 
 async function resizeImage(file, maxWidth = 640) {
-    return new Promise((resolve) => {
-      const img = new Image()
-      const url = URL.createObjectURL(file)
-      img.onload = () => {
-        const scale = Math.min(maxWidth / img.width, maxWidth / img.height, 1)
+    return new Promise(async (resolve) => {
+      try {
+        // createImageBitmap es más eficiente en memoria que Image()
+        const bitmap = await createImageBitmap(file, {
+          resizeWidth: maxWidth,
+          resizeQuality: 'medium'
+        })
         const canvas = document.createElement('canvas')
-        canvas.width = img.width * scale
-        canvas.height = img.height * scale
+        canvas.width = bitmap.width
+        canvas.height = bitmap.height
         const ctx = canvas.getContext('2d')
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
-        canvas.toBlob((blob) => resolve(blob), 'image/jpeg', 0.75)
-        URL.revokeObjectURL(url)
+        ctx.drawImage(bitmap, 0, 0)
+        bitmap.close() // liberar memoria inmediatamente
+        canvas.toBlob((blob) => resolve(blob), 'image/jpeg', 0.7)
+      } catch {
+        // fallback si createImageBitmap no está soportado
+        const img = new Image()
+        const url = URL.createObjectURL(file)
+        img.onload = () => {
+          const scale = Math.min(maxWidth / img.width, maxWidth / img.height, 1)
+          const canvas = document.createElement('canvas')
+          canvas.width = img.width * scale
+          canvas.height = img.height * scale
+          const ctx = canvas.getContext('2d')
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+          canvas.toBlob((blob) => resolve(blob), 'image/jpeg', 0.7)
+          URL.revokeObjectURL(url)
+        }
+        img.src = url
       }
-      img.src = url
     })
   }
 
