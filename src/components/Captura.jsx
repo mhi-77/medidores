@@ -41,19 +41,69 @@ export default function Captura({
     await runOCR(url)
   }
 
-  async function runOCR(url) {
+async function preprocessImage(url) {
+    return new Promise((resolve) => {
+      const img = new Image()
+      img.onload = () => {
+        const canvas = document.createElement('canvas')
+        const ctx = canvas.getContext('2d')
+
+        // Escalar la imagen a un tamaño fijo para consistencia
+        const MAX = 1200
+        const scale = Math.min(MAX / img.width, MAX / img.height, 1)
+        canvas.width = img.width * scale
+        canvas.height = img.height * scale
+
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+
+        // Escala de grises
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+        const data = imageData.data
+        for (let i = 0; i < data.length; i += 4) {
+          const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114
+          data[i] = gray
+          data[i + 1] = gray
+          data[i + 2] = gray
+        }
+        ctx.putImageData(imageData, 0, 0)
+
+        // Aumentar contraste
+        ctx.globalCompositeOperation = 'multiply'
+        ctx.fillStyle = 'rgb(255,255,255)'
+
+        // Umbralización (binarización) — convierte a blanco y negro puro
+        const imageData2 = ctx.getImageData(0, 0, canvas.width, canvas.height)
+        const data2 = imageData2.data
+        for (let i = 0; i < data2.length; i += 4) {
+          const val = data2[i] > 128 ? 255 : 0
+          data2[i] = val
+          data2[i + 1] = val
+          data2[i + 2] = val
+        }
+        ctx.putImageData(imageData2, 0, 0)
+
+        resolve(canvas.toDataURL('image/png'))
+      }
+      img.src = url
+    })
+  }
+
+async function runOCR(url) {
     setProcesando(true)
     setOcrEstado('Procesando imagen...')
     setOcrValor('')
     setOcrConfianza(null)
     try {
+      // Preprocesamiento de imagen
+      const processedUrl = await preprocessImage(url)
+
       const Tesseract = (await import('tesseract.js')).default
       const worker = await Tesseract.createWorker('eng')
       await worker.setParameters({
         tessedit_char_whitelist: '0123456789',
         tessedit_pageseg_mode: '7',
       })
-      const result = await worker.recognize(url)
+      const result = await worker.recognize(processedUrl)
       await worker.terminate()
 
       const texto = result.data.text.replace(/\D/g, '').trim()
