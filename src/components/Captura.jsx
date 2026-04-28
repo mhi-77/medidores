@@ -1,5 +1,6 @@
 import { useState, useRef } from 'react'
 import { buscarOCrearCarpeta, subirFoto } from '../services/google'
+import { buscarOCrearCarpeta, subirFoto, leerMedidorConVision } from '../services/google'
 
 export default function Captura({
   token, socios, lecturas, setLecturas,
@@ -41,85 +42,39 @@ export default function Captura({
     await runOCR(url)
   }
 
-async function preprocessImage(url) {
+async function imageToBase64(url) {
+    const res = await fetch(url)
+    const blob = await res.blob()
     return new Promise((resolve) => {
-      const img = new Image()
-      img.onload = () => {
-        const canvas = document.createElement('canvas')
-        const ctx = canvas.getContext('2d')
-
-        // Escalar la imagen a un tamaño fijo para consistencia
-        const MAX = 1200
-        const scale = Math.min(MAX / img.width, MAX / img.height, 1)
-        canvas.width = img.width * scale
-        canvas.height = img.height * scale
-
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
-
-        // Escala de grises
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
-        const data = imageData.data
-        for (let i = 0; i < data.length; i += 4) {
-          const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114
-          data[i] = gray
-          data[i + 1] = gray
-          data[i + 2] = gray
-        }
-        ctx.putImageData(imageData, 0, 0)
-
-        // Aumentar contraste
-        ctx.globalCompositeOperation = 'multiply'
-        ctx.fillStyle = 'rgb(255,255,255)'
-
-        // Umbralización (binarización) — convierte a blanco y negro puro
-        const imageData2 = ctx.getImageData(0, 0, canvas.width, canvas.height)
-        const data2 = imageData2.data
-        for (let i = 0; i < data2.length; i += 4) {
-          const val = data2[i] > 128 ? 255 : 0
-          data2[i] = val
-          data2[i + 1] = val
-          data2[i + 2] = val
-        }
-        ctx.putImageData(imageData2, 0, 0)
-
-        resolve(canvas.toDataURL('image/png'))
+      const reader = new FileReader()
+      reader.onloadend = () => {
+        const base64 = reader.result.split(',')[1]
+        resolve(base64)
       }
-      img.src = url
+      reader.readAsDataURL(blob)
     })
   }
 
-async function runOCR(url) {
+  async function runOCR(url) {
     setProcesando(true)
-    setOcrEstado('Procesando imagen...')
+    setOcrEstado('Procesando imagen con Google Vision...')
     setOcrValor('')
     setOcrConfianza(null)
     try {
-      // Preprocesamiento de imagen
-      const processedUrl = await preprocessImage(url)
+      const base64 = await imageToBase64(url)
+      const numero = await leerMedidorConVision(base64)
 
-      const Tesseract = (await import('tesseract.js')).default
-      const worker = await Tesseract.createWorker('eng')
-      await worker.setParameters({
-        tessedit_char_whitelist: '0123456789',
-        tessedit_pageseg_mode: '7',
-      })
-      const result = await worker.recognize(processedUrl)
-      await worker.terminate()
-
-      const texto = result.data.text.replace(/\D/g, '').trim()
-      const conf = Math.round(result.data.confidence)
-      setOcrValor(texto)
-      setOcrConfianza(conf)
-
-      if (conf >= 70) {
-        setOcrEstado('Resultado confiable. Verificá el número.')
-      } else if (conf >= 40) {
-        setOcrEstado('Resultado incierto. Corregí si es necesario.')
+      if (numero) {
+        setOcrValor(numero)
+        setOcrConfianza(95)
+        setOcrEstado('Resultado de Google Vision. Verificá el número.')
       } else {
-        setOcrEstado('No pudo leer bien. Ingresá el número manualmente.')
+        setOcrConfianza(0)
+        setOcrEstado('No se detectaron números. Ingresá manualmente.')
       }
     } catch (err) {
-      setOcrEstado('Error de OCR. Ingresá el número manualmente.')
+      setOcrEstado('Error al procesar. Verificá tu conexión.')
+      setOcrConfianza(0)
     }
     setProcesando(false)
   }

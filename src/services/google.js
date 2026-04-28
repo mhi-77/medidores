@@ -131,3 +131,35 @@ export async function subirFoto(token, archivo, nombre, carpetaId) {
 
   return data.webViewLink
 }
+
+// ── VISION OCR ───────────────────────────────────────────────────────────────
+
+export async function leerMedidorConVision(imagenBase64) {
+  const apiKey = import.meta.env.VITE_VISION_API_KEY
+  const url = `https://vision.googleapis.com/v1/images:annotate?key=${apiKey}`
+
+  const body = {
+    requests: [{
+      image: { content: imagenBase64 },
+      features: [{ type: 'TEXT_DETECTION', maxResults: 1 }],
+      imageContext: {
+        languageHints: ['en'],
+      }
+    }]
+  }
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+
+  const data = await res.json()
+
+  if (data.error) throw new Error(data.error.message)
+
+  const texto = data.responses?.[0]?.fullTextAnnotation?.text || ''
+  const soloNumeros = texto.replace(/\D/g, '').trim()
+
+  return soloNumeros
+}
