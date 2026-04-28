@@ -43,7 +43,7 @@ export default function Captura({
     await runOCR(url)
   }
 
-async function resizeImage(file, maxWidth = 1024) {
+async function resizeImage(file, maxWidth = 640) {
     return new Promise((resolve) => {
       const img = new Image()
       const url = URL.createObjectURL(file)
@@ -54,7 +54,7 @@ async function resizeImage(file, maxWidth = 1024) {
         canvas.height = img.height * scale
         const ctx = canvas.getContext('2d')
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
-        canvas.toBlob((blob) => resolve(blob), 'image/jpeg', 0.85)
+        canvas.toBlob((blob) => resolve(blob), 'image/jpeg', 0.75)
         URL.revokeObjectURL(url)
       }
       img.src = url
